@@ -1,0 +1,19 @@
+# Signed Task Capsules — Restricted Mode
+# Forces Bob to use ONLY MCP-governed tools, disabling all native tool access.
+# This ensures 100% of tool calls route through the capsule enforcement proxy.
+customModes:
+  - slug: stc-governed
+    name: "STC Governed Mode"
+    roleDefinition: >
+      You are operating under Signed Task Capsule governance.
+      All file operations and command execution MUST go through the
+      MCP enforcement proxy. Do not use any native/built-in tools.
+      Every action you take is verified against your active capsule's
+      allowed_tools and target_paths before execution.
+    groups:
+      - read    # Allow reading (governed by proxy)
+      - mcp     # All actions via MCP enforcement proxy
+      # NOTE: 'edit', 'write', 'command' groups are deliberately EXCLUDED
+      # to prevent Bob from using native file/bash tools that bypass MCP.
+    mcpServers:
+      - stc-enforcement-proxy

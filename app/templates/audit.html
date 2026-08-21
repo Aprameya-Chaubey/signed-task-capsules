@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="refresh" content="{{ refresh_seconds }}" />
+  <title>Audit Events</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #d8dee8;
+      --allowed-bg: #e8f8ee;
+      --allowed-text: #0f5132;
+      --blocked-bg: #fdecec;
+      --blocked-text: #7f1d1d;
+      --pending-bg: #fff7dd;
+      --pending-text: #7c5e10;
+      --accent: #0b5fff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: radial-gradient(circle at top right, #e7f0ff, var(--bg) 45%);
+      color: var(--text);
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    }
+
+    .panel {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+      overflow: hidden;
+    }
+
+    .header {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 1.2rem;
+      font-weight: 650;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .filter-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .filter-form input {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 240px;
+      font-size: 0.9rem;
+    }
+
+    .filter-form button,
+    .filter-form a {
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      border: 1px solid var(--border);
+      text-decoration: none;
+      color: var(--text);
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .filter-form button {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .table-wrap {
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 920px;
+    }
+
+    thead th {
+      text-align: left;
+      background: #f1f4f9;
+      color: #1d2738;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8rem;
+      letter-spacing: 0.02em;
+      padding: 10px 12px;
+      white-space: nowrap;
+    }
+
+    th button {
+      all: unset;
+      cursor: pointer;
+      color: inherit;
+      font-weight: 600;
+    }
+
+    tbody td {
+      border-bottom: 1px solid #eef2f7;
+      padding: 10px 12px;
+      font-size: 0.85rem;
+      vertical-align: top;
+    }
+
+    tr.row-allowed { background: var(--allowed-bg); color: var(--allowed-text); }
+    tr.row-blocked { background: var(--blocked-bg); color: var(--blocked-text); }
+    tr.row-pending { background: var(--pending-bg); color: var(--pending-text); }
+
+    .mono {
+      font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+      font-size: 0.82rem;
+    }
+
+    .empty {
+      padding: 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="header">
+      <div>
+        <h1 class="title">Audit Events</h1>
+        <p class="subtitle">Auto-refreshes every {{ refresh_seconds }}s. Click a column title to sort.</p>
+      </div>
+      <form class="filter-form" method="get" action="/audit">
+        <input type="text" name="capsule_id" value="{{ capsule_id }}" placeholder="Filter by capsule ID" />
+        <button type="submit">Filter</button>
+        <a href="/audit">Clear</a>
+      </form>
+    </div>
+
+    {% if events %}
+      <div class="table-wrap">
+        <table id="audit-table">
+          <thead>
+            <tr>
+              <th><button type="button" onclick="sortTable(0)">Timestamp</button></th>
+              <th><button type="button" onclick="sortTable(1)">Capsule ID</button></th>
+              <th><button type="button" onclick="sortTable(2)">Event Type</button></th>
+              <th><button type="button" onclick="sortTable(3)">Trust Tier</button></th>
+              <th><button type="button" onclick="sortTable(4)">Tool</button></th>
+              <th><button type="button" onclick="sortTable(5)">Path</button></th>
+              <th><button type="button" onclick="sortTable(6)">Detail</button></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in events %}
+              <tr class="{{ row.row_class }}">
+                <td class="mono">{{ row.event.timestamp }}</td>
+                <td class="mono" title="{{ row.event.capsule_id or '—' }}">{{ row.capsule_short }}</td>
+                <td>{{ row.event.event_type.value }}</td>
+                <td>{{ row.event.trust_tier.value if row.event.trust_tier else "-" }}</td>
+                <td>{{ row.event.tool_name or "-" }}</td>
+                <td class="mono">{{ row.event.target_path or "-" }}</td>
+                <td>{{ row.event.detail or "-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">No audit events found.</div>
+    {% endif %}
+  </div>
+
+  <script>
+    let sortState = {};
+
+    function sortTable(columnIndex) {
+      const table = document.getElementById("audit-table");
+      const tbody = table.tBodies[0];
+      const rows = Array.from(tbody.rows);
+      const direction = sortState[columnIndex] === "asc" ? "desc" : "asc";
+      sortState = { [columnIndex]: direction };
+
+      rows.sort((a, b) => {
+        const textA = a.cells[columnIndex].innerText.trim().toLowerCase();
+        const textB = b.cells[columnIndex].innerText.trim().toLowerCase();
+        if (textA < textB) return direction === "asc" ? -1 : 1;
+        if (textA > textB) return direction === "asc" ? 1 : -1;
+        return 0;
+      });
+
+      for (const row of rows) {
+        tbody.appendChild(row);
+      }
+    }
+  </script>
+</body>
+</html>
