@@ -11,9 +11,8 @@ customModes:
       Every action you take is verified against your active capsule's
       allowed_tools and target_paths before execution.
     groups:
-      - read    # Allow reading (governed by proxy)
       - mcp     # All actions via MCP enforcement proxy
-      # NOTE: 'edit', 'write', 'command' groups are deliberately EXCLUDED
+      # NOTE: 'read', 'edit', 'write', 'command' groups are deliberately EXCLUDED
       # to prevent Bob from using native file/bash tools that bypass MCP.
     mcpServers:
       - stc-enforcement-proxy

@@ -70,10 +70,10 @@ class Settings(BaseSettings):
         validation_alias="PENDING_CLEANUP_INTERVAL_MINUTES",
         description="How often the background sweep checks for expired/stale pending approvals",
     )
-    host: str = Field(default="0.0.0.0", validation_alias="HOST")
+    host: str = Field(default="127.0.0.1", validation_alias="HOST")
     port: int = Field(default=8000, validation_alias="PORT")
     github_actions_identity: str = Field(
-        default="https://github.com/example/repo/.github/workflows/main.yml@refs/heads/main",
+        default="PLACEHOLDER_SIGSTORE_IDENTITY_MUST_BE_CONFIGURED",
         validation_alias="GITHUB_ACTIONS_IDENTITY"
     )
     github_actions_issuer: str = Field(
@@ -84,9 +84,20 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return one immutable settings object for the running process."""
-
-    return Settings()
+    """Return one immutable settings object for the running process.
+    
+    Raises a configuration error if the Sigstore identity is still set to the placeholder value.
+    """
+    settings = Settings()
+    
+    # Validate that Sigstore identity has been properly configured
+    if settings.github_actions_identity == "PLACEHOLDER_SIGSTORE_IDENTITY_MUST_BE_CONFIGURED":
+        raise ValueError(
+            "GITHUB_ACTIONS_IDENTITY must be configured with a valid Sigstore identity URL. "
+            "The placeholder default value is not acceptable for production use."
+        )
+    
+    return settings
 
 
 settings = get_settings()

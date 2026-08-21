@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+import textwrap
 import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -130,7 +131,12 @@ async def _post_human_approval_comment(
     pending_id: str,
     settings: Settings,
 ) -> None:
-    """Post a best-effort GitHub comment requesting human capsule approval."""
+    """Post a best-effort GitHub comment requesting human capsule approval.
+
+    The pending_id is NOT included in the public comment to avoid leaking
+    internal UUIDs. It should be provided through a private channel only
+    (e.g., admin console, Slack, maintainer-only issue comment).
+    """
 
     repo_full_name = payload.get("repository", {}).get("full_name")
     issue_number = _extract_issue_number(payload)
@@ -138,10 +144,12 @@ async def _post_human_approval_comment(
     if not isinstance(repo_full_name, str) or not repo_full_name or issue_number is None:
         return
 
+    # Sanitize and truncate intent to avoid leaking sensitive info or excessive length
+    sanitized_intent = textwrap.shorten(policy_decision.intent, width=200, placeholder="...")
+
     comment_body = (
         "Governance requires human approval before this capsule can be issued. "
-        f"Pending ID: {pending_id}. "
-        f"Intent: {policy_decision.intent}."
+        f"Intent: {sanitized_intent}."
     )
 
     try:
@@ -201,6 +209,12 @@ async def webhook(
 
     raw_body = await request.body()
 
+    if not x_github_delivery:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-GitHub-Delivery header",
+        )
+
     # Authenticate before anything else touches shared state (e.g. the
     # duplicate-delivery cache), so an unauthenticated caller can't use
     # arbitrary X-GitHub-Delivery values to pollute or evict it.
@@ -253,7 +267,13 @@ async def webhook(
         dependencies.compiler.compile(webhook_event.raw_text),
     )
 
-    thread_id = _extract_thread_id(decoded_payload, webhook_event.repo_full_name, x_github_delivery)
+    try:
+        thread_id = _extract_thread_id(decoded_payload, webhook_event.repo_full_name, x_github_delivery)
+    except ValueError as exc:
+        return GovernancePipelineOutput(
+            status="denied",
+            denial_reason=f"Unsupported event: {exc}",
+        )
     session_history = await dependencies.session_tracker.get_or_create(thread_id)
 
     policy_decision = dependencies.policy_engine.evaluate(

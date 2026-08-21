@@ -117,11 +117,6 @@ def path_allowed(canonical_path: str, allowed_patterns: list[str]) -> bool:
     normalized = canonical_path.replace("\\", "/")
     relative = normalized.lstrip("/")
 
-    variants = {normalized, relative}
-    if relative:
-        variants.add(f"./{relative}")
-        variants.add(f"/{relative}")
-
     for pattern in allowed_patterns:
         if match_pattern(canonical_path, pattern):
             return True

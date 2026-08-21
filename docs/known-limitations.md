@@ -8,17 +8,26 @@ scope for the hackathon implementation. Each item has a clear production fix.
 - **Native tool bypass.** IBM Bob's built-in file/bash tools do not route through
   the MCP enforcement proxy. This build relies on `.bob/custom_modes.yaml`
   (`stc-governed` mode) to disable native tools so 100% of actions flow through
-  the governed proxy. Production fix: integrate capsule verification into Bob's
-  core execution loop.
+  the governed proxy. The `stc-governed` mode explicitly excludes the `read`
+  group to prevent any native read operations outside capsule scope. Production
+  fix: integrate capsule verification into Bob's core execution loop.
+
+- **External-proxy architecture limitation.** Removing the `read` group from
+  `stc-governed` mode means Bob cannot perform native reads even within the
+  capsule's `target_paths`. All reads must go through the MCP proxy. This is a
+  known limitation of the external-proxy architecture: native tool groups are
+  all-or-nothing, so we exclude them entirely and rely on `.bobignore` as a
+  static safety net.
 
 ## Network requests
 
-- **No destination validation for `net_request` (SSRF).** Once a capsule grants
-  the `net_request` tool, the proxy does not validate the destination URL or
-  host. An approved `net_request` could reach internal endpoints or
-  attacker-controlled servers. Production fix: carry an explicit allowlist of
-  permitted destination hosts inside the capsule and enforce it in
-  `app/enforcement/proxy.py`.
+- **`net_request` SSRF hardening (resolved).** The `net_request` tool includes comprehensive SSRF protection:
+  - Allowlist enforcement for destination hosts
+  - `getaddrinfo`-based DNS resolution with private-IP rejection
+  - IP-pinned connections to prevent redirect-based bypasses
+  - Per-redirect re-validation of destination IPs
+  
+  See `app/enforcement/proxy.py` for implementation details.
 
 ## Path handling
 

@@ -1,21 +1,26 @@
 from __future__ import annotations
 import fnmatch
 
+def _normalize_parts(value: str) -> list[str]:
+    """Normalize a path or pattern into segments, skipping empty and '.' parts."""
+    parts = []
+    for part in value.replace("\\", "/").split("/"):
+        if part == "..":
+            if not parts:  # Escape attempt
+                return []
+            parts.pop()
+        elif part and part != ".":
+            parts.append(part)
+    return parts
+
 def match_pattern(path: str, pattern: str) -> bool:
     """
     Segment-aware glob matcher.
     '**' matches zero or more complete segments.
+    Both path and pattern are normalized consistently (backslashes, '.', empty segments).
     """
-    path_parts = []
-    for part in path.replace("\\", "/").split("/"):
-        if part == "..":
-            if not path_parts: # Escape attempt
-                return False
-            path_parts.pop()
-        elif part and part != ".":
-            path_parts.append(part)
-            
-    pattern_parts = pattern.replace("\\", "/").split("/")
+    path_parts = _normalize_parts(path)
+    pattern_parts = _normalize_parts(pattern)
     
     return _match_recursive(path_parts, pattern_parts)
 

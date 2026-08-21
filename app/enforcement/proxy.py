@@ -117,10 +117,9 @@ class MCPEnforcementProxy:
             for path in self._extract_paths(validated_request.params.arguments)
         ]
 
-        # KNOWN LIMITATION: net_request tool does not validate destination URLs.
-        # An approved net_request capsule could reach internal endpoints or
-        # attacker-controlled servers. Production fix: allowlist of permitted
-        # destination hosts in the capsule itself. See docs/known-limitations.md.
+        # Note: net_request destination validation is enforced via allowlist,
+        # getaddrinfo-based DNS resolution with private-IP rejection, IP-pinned
+        # connections, and per-redirect re-validation. See docs/known-limitations.md.
 
         if capsule.is_expired():
             reason = "Capsule has expired"
@@ -169,18 +168,29 @@ class MCPEnforcementProxy:
                     self._blocked_message(capsule.capsule_id, reason),
                 )
 
-        forwarded_result = self._tool_handler(request, connection_id, capsule)
-        if inspect.isawaitable(forwarded_result):
-            forwarded_result = await forwarded_result
+        try:
+            forwarded_result = self._tool_handler(request, connection_id, capsule)
+            if inspect.isawaitable(forwarded_result):
+                forwarded_result = await forwarded_result
 
-        await self._log_decision(
-            capsule=capsule,
-            tool_name=tool_name,
-            allowed=True,
-            block_reason=None,
-            matched_paths=matched_paths,
-        )
-        return _jsonrpc_success_response(validated_request.id, forwarded_result)
+            ok = bool(forwarded_result.get("ok")) if isinstance(forwarded_result, dict) else False
+            await self._log_decision(
+                capsule=capsule,
+                tool_name=tool_name,
+                allowed=ok,
+                block_reason=None if ok else forwarded_result.get("error", "handler_rejected"),
+                matched_paths=matched_paths,
+            )
+            return _jsonrpc_success_response(validated_request.id, forwarded_result)
+        except Exception as exc:
+            await self._log_decision(
+                capsule=capsule,
+                tool_name=tool_name,
+                allowed=False,
+                block_reason=f"handler_exception: {type(exc).__name__}: {exc}",
+                matched_paths=matched_paths,
+            )
+            return _jsonrpc_error_response(validated_request.id, -32603, "Internal tool error")
 
     async def _log_decision(
         self,

@@ -29,12 +29,17 @@ async def approve_capsule(
     if pending_data["status"] != "pending":
         raise HTTPException(status_code=409, detail="Pending approval already resolved")
 
+    # Atomically claim the pending record before signing to prevent race conditions
+    claim = await dependencies.pending_store.try_claim_pending(capsule_id)
+    if not claim:
+        raise HTTPException(status_code=409, detail="Pending approval already resolved")
+
     policy_decision = PolicyDecision.model_validate_json(pending_data["policy_decision"])
     
-    # Sign the capsule now!
+    # Sign the capsule now that we have exclusive claim
     signed_capsule = await dependencies.signer.sign(policy_decision)
 
-    # Atomically mark resolved AND record issued
+    # Record issued AND mark resolved atomically
     success = await dependencies.pending_store.record_issued_and_resolve(
         capsule_id, signed_capsule, pending_data["thread_id"]
     )
