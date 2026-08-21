@@ -24,22 +24,18 @@ A cryptographic signature does **not** make the contents safe. It only proves th
 
 ```mermaid
 flowchart TD
-    A[Untrusted text] --> B[Task Compiler<br/>schema-validated, zero tools]
-    B --> C[Trust Tier<br/>GitHub permissions API]
-    C --> D[Policy Engine<br/>request ∩ trust ceiling]
-    D --> E[Signer<br/>Sigstore or Ed25519 fallback]
-    E --> F[Signed Capsule]
-
-    subgraph Bob[Bob in stc-governed mode]
-        G[Native edit/command tools disabled<br/>MCP-only execution]
-        H[MCP Enforcement Proxy<br/>validates signature + expiry<br/>checks allowed_tools + target_paths]
-    end
-
-    F --> G
-    G --> H
-    H --> I{Tool call in scope?}
-    I -->|Yes| J[Execute tool]
-    I -->|No| K[Block + log against capsule ID]
+    Text[Untrusted Repository Text] --> Compiler[Task Compiler]
+    Compiler -->|JSON Schema| Policy[Policy Engine & Trust Tier]
+    Policy -->|Scope Capped| Signer[Cryptographic Signer]
+    Signer -->|Issues| Capsule[Signed Task Capsule]
+    
+    Capsule -.->|Constrains| Agent[IBM Bob]
+    
+    Agent -->|MCP Tool Call| Proxy[STC Enforcement Proxy]
+    Capsule -.->|Verified by| Proxy
+    
+    Proxy -->|Out of scope| Block[Blocked & Logged]
+    Proxy -->|In scope| Allow[Tool Execution]
 ```
 
 If a tool call is outside the capsule, it is blocked and logged against the capsule ID.
