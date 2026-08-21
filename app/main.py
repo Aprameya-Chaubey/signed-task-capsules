@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 
 import httpx
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from app.audit.logger import AuditLogger
 from app.audit.viewer import router as audit_router
+from app.auth import require_admin_auth
 from app.config import Settings, settings
 from app.enforcement.mcp_server import create_app_mcp_router
 from app.enforcement.proxy import MCPEnforcementProxy
@@ -115,9 +116,11 @@ async def lifespan(application: FastAPI):
         except asyncio.CancelledError:
             pass
 
+        # Persist session history before closing to avoid race conditions
+        await session_tracker.persist(settings.database_path)
+        await session_tracker.close()
+
         await asyncio.gather(
-            session_tracker.persist(settings.database_path),
-            session_tracker.close(),
             audit_logger.close(),
             pending_store.close(),
             http_client.aclose(),
@@ -129,7 +132,10 @@ app = FastAPI(title="Signed Task Capsules", lifespan=lifespan)
 app.include_router(audit_router)
 app.include_router(webhook_router)
 app.include_router(approval_router)
-app.include_router(create_app_mcp_router())
+app.include_router(
+    create_app_mcp_router(),
+    dependencies=[Depends(require_admin_auth)],
+)
 
 
 @app.get("/")

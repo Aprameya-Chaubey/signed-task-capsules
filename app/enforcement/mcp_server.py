@@ -254,8 +254,17 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.transport == "http":
-        # ... (network-mode compatibility logic omitted for brevity)
-        pass
+        import uvicorn
+        from fastapi import FastAPI
+        
+        http_app = FastAPI(title="STC MCP Server")
+        http_app.include_router(create_app_mcp_router())
+        
+        host = args.host or "127.0.0.1"
+        port = args.port or 3000
+        
+        uvicorn.run(http_app, host=host, port=port)
+        return
 
     asyncio.run(_serve_stdio(args.thread_id))
 

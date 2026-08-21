@@ -120,9 +120,10 @@ net_request."""
         )
 
     def _safe_fallback(self) -> CompilerOutput:
+        """Return a safe fallback with no tools or paths on compilation failure."""
         return CompilerOutput(
             intent="Failed to parse task",
-            requested_tools=[KnownTools.READ_FILE],
+            requested_tools=[],
             target_paths=[],
             compiler_model=self._settings.llm_model,
             compiler_version=self.COMPILER_VERSION,

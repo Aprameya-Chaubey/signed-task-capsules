@@ -8,14 +8,14 @@ default allow := false
 tier_caps := {
     "external": {
         "tools": {"read_file"},
-        "denied_paths": {"**/.env", "**/.env.*", "**/secrets/**", "**/.git/**"},
+        "denied_paths": {"**/.env", "**/.env.*", "**/secrets/**", "**/.git/**", "**/*.key", "**/*.pem"},
         "max_files": 5,
         "network": false,
         "secrets": false,
     },
     "contributor": {
         "tools": {"read_file", "write_file", "run_tests"},
-        "denied_paths": {"**/.env", "**/.env.*", "**/secrets/**", "**/.git/**"},
+        "denied_paths": {"**/.env", "**/.env.*", "**/secrets/**", "**/.git/**", "**/*.key", "**/*.pem"},
         "max_files": 50,
         "network": false,
         "secrets": false,
