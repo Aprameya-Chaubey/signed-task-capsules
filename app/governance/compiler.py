@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+import httpx
+
 from app.config import Settings, get_settings
 from app.governance.llm_client import LLMClient, create_llm_client
 from app.models import CompilerOutput, KnownTools
@@ -43,6 +45,11 @@ net_request."""
                 "type": "array",
                 "items": {"type": "string", "minLength": 1, "maxLength": 200},
                 "maxItems": 20,
+            },
+            "allowed_hosts": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1, "maxLength": 253},
+                "maxItems": 10,
             },
         },
         "required": ["intent", "requested_tools", "target_paths"],
@@ -88,7 +95,8 @@ net_request."""
         if not isinstance(payload, dict):
             raise ValueError("LLM completion must be a JSON object")
         expected_fields = {"intent", "requested_tools", "target_paths"}
-        if set(payload) != expected_fields:
+        optional_fields = {"allowed_hosts"}
+        if not expected_fields.issubset(set(payload)) or not set(payload).issubset(expected_fields | optional_fields):
             raise ValueError("LLM completion must contain exactly the capsule request fields")
 
         intent = payload["intent"]
@@ -110,11 +118,17 @@ net_request."""
             for path in target_paths
             if isinstance(path, str) and 1 <= len(path) <= 200
         ]
+        raw_hosts = payload.get("allowed_hosts", [])
+        valid_hosts = [
+            h for h in raw_hosts
+            if isinstance(h, str) and 1 <= len(h) <= 253
+        ][:10]
 
         return CompilerOutput(
             intent=intent,
             requested_tools=valid_tools[:5],
             target_paths=valid_paths[:20],
+            allowed_hosts=valid_hosts,
             compiler_model=self._settings.llm_model,
             compiler_version=self.COMPILER_VERSION,
         )

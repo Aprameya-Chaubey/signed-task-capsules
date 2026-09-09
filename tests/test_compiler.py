@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 import asyncio
 import json
 from typing import Any
@@ -93,7 +94,7 @@ def test_llm_failure_returns_safe_fallback() -> None:
     result = asyncio.run(compiler(FakeLLMClient(RuntimeError("provider unavailable"))).compile("Fix it"))
 
     assert result.intent == "Failed to parse task"
-    assert result.requested_tools == [KnownTools.READ_FILE]
+    assert result.requested_tools == []
     assert result.target_paths == []
 
 

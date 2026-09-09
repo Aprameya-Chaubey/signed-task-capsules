@@ -207,17 +207,18 @@ async def webhook(
 ) -> GovernancePipelineOutput:
     """Receive a GitHub webhook and run the full governance pipeline."""
 
-    raw_body = await request.body()
+    MAX_BODY_SIZE = 1024 * 1024
+    raw_body = bytearray()
+    async for chunk in request.stream():
+        raw_body.extend(chunk)
+        if len(raw_body) > MAX_BODY_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Payload too large",
+            )
+    raw_body = bytes(raw_body)
 
-    if not x_github_delivery:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing X-GitHub-Delivery header",
-        )
-
-    # Authenticate before anything else touches shared state (e.g. the
-    # duplicate-delivery cache), so an unauthenticated caller can't use
-    # arbitrary X-GitHub-Delivery values to pollute or evict it.
+    # SEC-04: Authenticate before anything else touches shared state or validates other headers
     if not verify_hmac(
         raw_body=raw_body,
         signature_header=x_hub_signature_256 or "",
@@ -226,6 +227,12 @@ async def webhook(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid webhook signature",
+        )
+
+    if not x_github_delivery:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-GitHub-Delivery header",
         )
 
     if await dependencies.session_tracker.is_duplicate_delivery(x_github_delivery):

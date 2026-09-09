@@ -47,6 +47,7 @@ async def _default_tool_handler(request: dict[str, Any], connection_id: str, cap
     _ = connection_id
     _ = capsule
     return {
+        "ok": True,
         "forwarded": True,
         "request": request,
     }
@@ -130,10 +131,10 @@ class MCPEnforcementProxy:
                 block_reason=reason,
                 matched_paths=matched_paths,
             )
-            return _jsonrpc_error_response(
+            # MCP spec: structurally valid but blocked → success envelope with isError
+            return _jsonrpc_success_response(
                 validated_request.id,
-                -32600,
-                self._blocked_message(capsule.capsule_id, reason),
+                {"content": [{"type": "text", "text": self._blocked_message(capsule.capsule_id, reason)}], "isError": True},
             )
 
         allowed_tools = {allowed_tool.value for allowed_tool in capsule.allowed_tools}
@@ -146,10 +147,9 @@ class MCPEnforcementProxy:
                 block_reason=reason,
                 matched_paths=matched_paths,
             )
-            return _jsonrpc_error_response(
+            return _jsonrpc_success_response(
                 validated_request.id,
-                -32600,
-                self._blocked_message(capsule.capsule_id, reason),
+                {"content": [{"type": "text", "text": self._blocked_message(capsule.capsule_id, reason)}], "isError": True},
             )
 
         for matched_path in matched_paths:
@@ -162,11 +162,21 @@ class MCPEnforcementProxy:
                     block_reason=reason,
                     matched_paths=matched_paths,
                 )
-                return _jsonrpc_error_response(
+                return _jsonrpc_success_response(
                     validated_request.id,
-                    -32600,
-                    self._blocked_message(capsule.capsule_id, reason),
+                    {"content": [{"type": "text", "text": self._blocked_message(capsule.capsule_id, reason)}], "isError": True},
                 )
+
+        # Log the tool call attempt BEFORE executing the handler, so a
+        # forensic record always exists even if the handler crashes or the
+        # post-execution log fails (closes the fail-open audit evasion).
+        await self._log_decision(
+            capsule=capsule,
+            tool_name=tool_name,
+            allowed=True,
+            block_reason="pre_execution_attempt",
+            matched_paths=matched_paths,
+        )
 
         try:
             forwarded_result = self._tool_handler(request, connection_id, capsule)
@@ -181,7 +191,7 @@ class MCPEnforcementProxy:
                 block_reason=None if ok else forwarded_result.get("error", "handler_rejected"),
                 matched_paths=matched_paths,
             )
-            return _jsonrpc_success_response(validated_request.id, forwarded_result)
+            return _jsonrpc_success_response(validated_request.id, self._to_mcp_result(forwarded_result))
         except Exception as exc:
             await self._log_decision(
                 capsule=capsule,
@@ -218,10 +228,34 @@ class MCPEnforcementProxy:
                 ),
                 trust_tier=capsule.trust_tier,
                 tool_name=decision.tool_name,
-                target_path=(decision.matched_paths[0] if decision.matched_paths else None),
+                target_path=("; ".join(decision.matched_paths) if decision.matched_paths else None),
                 detail=decision.block_reason,
             )
         )
+
+    @staticmethod
+    def _to_mcp_result(handler_result: dict[str, Any]) -> dict[str, Any]:
+        """Translate GovernedToolHandler's internal dict into an MCP content envelope.
+
+        GovernedToolHandler returns {"ok": bool, "content": str, ...} or
+        {"ok": False, "error": str, ...}.  The MCP spec requires the tools/call
+        result to be {"content": [{"type": "text", "text": "..."}], "isError": bool}.
+        """
+        if not isinstance(handler_result, dict):
+            return {"content": [{"type": "text", "text": str(handler_result)}], "isError": True}
+
+        ok = bool(handler_result.get("ok"))
+
+        if ok:
+            # Successful tool execution — wrap content string in MCP array envelope
+            raw = handler_result.get("content", "")
+            if not isinstance(raw, str):
+                raw = str(raw)
+            return {"content": [{"type": "text", "text": raw}], "isError": False}
+        else:
+            # Tool returned an error — surface it as an MCP isError result
+            error_msg = handler_result.get("error", "Tool execution failed")
+            return {"content": [{"type": "text", "text": error_msg}], "isError": True}
 
     @staticmethod
     def _blocked_message(capsule_id: str, reason: str) -> str:

@@ -42,7 +42,9 @@ def run_scenario() -> dict[str, Any]:
     compiler_output = CompilerOutput(
         intent="Read and update project source",
         requested_tools=[KnownTools.READ_FILE, KnownTools.WRITE_FILE],
-        target_paths=["src/**"],
+        # src/**/*.py avoids glob-intersection with denied patterns like **/.env;
+        # a realistic capsule for Python source editing would use a file-type anchor.
+        target_paths=["src/**/*.py"],
         compiler_model="demo-compiler",
         compiler_version="1.0.0",
     )
@@ -97,11 +99,13 @@ def run_scenario() -> dict[str, Any]:
         "scenario": "D",
         "status": pipeline_output.status,
         "capsule_loaded_from_store": pipeline_output.capsule_id is not None,
-        "governed_read_ok": allowed_read.get("result", {}).get("ok") is True,
-        "governed_read_content": allowed_read.get("result", {}).get("content"),
-        "governed_write_ok": governed_write.get("result", {}).get("ok") is True,
+        "governed_read_ok": allowed_read.get("result", {}).get("isError") is not True
+            and bool(allowed_read.get("result", {}).get("content")),
+        "governed_read_content": (allowed_read.get("result", {}).get("content") or [{}])[0].get("text"),
+        "governed_write_ok": governed_write.get("result", {}).get("isError") is not True
+            and bool(governed_write.get("result", {}).get("content")),
         "patch_written": (work_dir / "src" / "patch.py").exists(),
-        "blocked_env_read": "error" in blocked_env,
+        "blocked_env_read": blocked_env.get("result", {}).get("isError") is True,
     }
 
 

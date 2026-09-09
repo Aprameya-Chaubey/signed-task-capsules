@@ -53,7 +53,6 @@ wheels/
 .env.dev
 .env.prod
 .env.backup
-.env.example
 
 # IDE and editor files
 .vscode/
@@ -64,10 +63,13 @@ wheels/
 .DS_Store
 Thumbs.db
 
-# Testing
-.tests/
-test/
-tests/
+# Custom specific
+data/
+.agents/
+.bob/
+.bobignore
+graphify-out/
+.pytest_tmp/
 
 # Documentation
 docs/_build/

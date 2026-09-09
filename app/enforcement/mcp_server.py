@@ -16,6 +16,28 @@ from app.enforcement.proxy import MCPEnforcementProxy
 from app.models import SignedCapsule
 
 
+def _reconfigure_stdio() -> None:
+    """Switch stdin/stdout to UTF-8 on Windows (Bob spawns with cp1252 by default).
+
+    Without this, json.dumps output containing characters outside cp1252 — such as
+    the U+2264 (≤) in README.md — raises UnicodeEncodeError when written to stdout,
+    silently killing the tool call response.
+    """
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if hasattr(sys.stdin, "reconfigure"):
+        try:
+            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_reconfigure_stdio()
+
+
 logger = logging.getLogger(__name__)
 
 CapsuleLoader = Callable[[str], Awaitable[SignedCapsule | None]]
@@ -42,6 +64,83 @@ def _jsonrpc_success_response(request_id: str | int | None, result: Any) -> dict
         "id": request_id,
         "result": result,
     }
+
+
+TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "read_file": {
+        "name": "read_file",
+        "description": "Read the complete contents of a file at the specified path within the workspace.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative path to the file to read (e.g. 'README.md')",
+                }
+            },
+            "required": ["path"],
+        },
+    },
+    "write_file": {
+        "name": "write_file",
+        "description": "Write or overwrite content to a file at the specified path within the workspace.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative path to the file to write",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Text content to write into the file",
+                },
+            },
+            "required": ["path", "content"],
+        },
+    },
+    "net_request": {
+        "name": "net_request",
+        "description": "Make an HTTP request to an authorized destination host.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The destination URL to request",
+                },
+                "method": {
+                    "type": "string",
+                    "description": "HTTP method (GET, POST, etc.)",
+                    "default": "GET",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    "execute_cmd": {
+        "name": "execute_cmd",
+        "description": "Execute a shell command within the workspace.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command line to execute",
+                }
+            },
+            "required": ["command"],
+        },
+    },
+    "run_tests": {
+        "name": "run_tests",
+        "description": "Run repository test suites.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+}
 
 
 class MCPServer:
@@ -80,11 +179,44 @@ class MCPServer:
         if request.get("jsonrpc") != "2.0":
             return _jsonrpc_error_response(request_id, -32600, "Invalid JSON-RPC version")
 
+        method = request.get("method")
+
+        # Standard MCP lifecycle initialization
+        if method == "initialize":
+            client_version = request.get("params", {}).get("protocolVersion", "2024-11-05")
+            return _jsonrpc_success_response(
+                request_id,
+                {
+                    "protocolVersion": client_version,
+                    "capabilities": {
+                        "tools": {
+                            "listChanged": False,
+                        },
+                    },
+                    "serverInfo": {
+                        "name": "stc-enforcement-proxy",
+                        "version": "1.0.0",
+                    },
+                },
+            )
+
+        # JSON-RPC notifications (no id) must not produce a response
+        if "id" not in request or request_id is None:
+            return None
+
+        if method == "ping":
+            return _jsonrpc_success_response(request_id, {})
+
+        if method == "resources/list":
+            return _jsonrpc_success_response(request_id, {"resources": []})
+
+        if method == "prompts/list":
+            return _jsonrpc_success_response(request_id, {"prompts": []})
+
         # Authoritative thread-id enforcement
         if not thread_id:
             return _jsonrpc_error_response(request_id, -32600, "Missing or invalid thread_id")
 
-        method = request.get("method")
         if method in ("tools/call", "tools/list"):
             await self._refresh_active_capsule(thread_id)
 
@@ -94,14 +226,25 @@ class MCPServer:
         if method == "tools/list":
             allowed_tools = self._proxy.list_allowed_tools(thread_id)
             if allowed_tools is None:
-                return _jsonrpc_error_response(
-                    request_id,
-                    -32600,
-                    "No active capsule for thread",
-                )
+                # No active capsule yet — return the full catalogue so Bob
+                # connects and shows a green indicator before the first capsule
+                # is issued.  Enforcement still happens at tools/call time.
+                tools = list(TOOL_DEFINITIONS.values())
+            else:
+                tools = [
+                    TOOL_DEFINITIONS.get(
+                        tool_name,
+                        {
+                            "name": tool_name,
+                            "description": f"Governed tool: {tool_name}",
+                            "inputSchema": {"type": "object", "properties": {}},
+                        },
+                    )
+                    for tool_name in allowed_tools
+                ]
             return _jsonrpc_success_response(
                 request_id,
-                {"tools": [{"name": tool_name} for tool_name in allowed_tools]},
+                {"tools": tools},
             )
 
         return _jsonrpc_error_response(request_id, -32601, f"Method not found: {method}")
@@ -133,9 +276,10 @@ class MCPServer:
             else:
                 response = await self.dispatch(request, thread_id)
 
-            encoded = json.dumps(response, separators=(",", ":"))
-            await asyncio.to_thread(writer.write, f"{encoded}\n")
-            await asyncio.to_thread(writer.flush)
+            if response is not None:
+                encoded = json.dumps(response, separators=(",", ":"), ensure_ascii=False)
+                await asyncio.to_thread(writer.write, f"{encoded}\n")
+                await asyncio.to_thread(writer.flush)
 
     def create_http_router(self) -> APIRouter:
         """Expose one HTTP JSON-RPC endpoint for network-mode local demos."""
@@ -255,10 +399,11 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.transport == "http":
         import uvicorn
-        from fastapi import FastAPI
+        from fastapi import FastAPI, Depends
+        from app.auth import require_admin_auth
         
         http_app = FastAPI(title="STC MCP Server")
-        http_app.include_router(create_app_mcp_router())
+        http_app.include_router(create_app_mcp_router(), dependencies=[Depends(require_admin_auth)])
         
         host = args.host or "127.0.0.1"
         port = args.port or 3000

@@ -74,6 +74,7 @@ class FakeAuditLogger:
 
 async def fake_tool_handler(request: dict, connection_id: str, capsule: SignedCapsule) -> dict:
     return {
+        "ok": True,
         "forwarded": True,
         "connection_id": connection_id,
         "tool": request["params"]["name"],
@@ -117,9 +118,12 @@ def test_tool_call_allowed_when_tool_and_path_are_in_scope(workspace_tmp_path: P
     )
 
     assert "result" in response
-    assert response["result"]["forwarded"] is True
-    assert len(audit_logger.events) == 1
+    assert response["result"].get("isError") is not True
+    assert response["result"].get("content") is not None
+    assert len(audit_logger.events) == 2
     assert audit_logger.events[0].event_type is AuditEventType.TOOL_ALLOWED
+    assert audit_logger.events[0].detail == "pre_execution_attempt"
+    assert audit_logger.events[1].event_type is AuditEventType.TOOL_ALLOWED
 
 
 def test_tool_call_blocked_when_tool_not_in_allowed_tools(workspace_tmp_path: Path) -> None:
@@ -142,8 +146,9 @@ def test_tool_call_blocked_when_tool_not_in_allowed_tools(workspace_tmp_path: Pa
         )
     )
 
-    assert response["error"]["code"] == -32600
-    assert "blocked" in response["error"]["message"].lower()
+    assert "result" in response
+    assert response["result"]["isError"] is True
+    assert "blocked" in response["result"]["content"][0]["text"].lower()
     assert len(audit_logger.events) == 1
     assert audit_logger.events[0].event_type is AuditEventType.TOOL_BLOCKED
 
@@ -168,8 +173,9 @@ def test_tool_call_blocked_when_path_outside_scope(workspace_tmp_path: Path) -> 
         )
     )
 
-    assert response["error"]["code"] == -32600
-    assert "outside allowed target paths" in response["error"]["message"]
+    assert "result" in response
+    assert response["result"]["isError"] is True
+    assert "outside allowed target paths" in response["result"]["content"][0]["text"]
     assert audit_logger.events[0].event_type is AuditEventType.TOOL_BLOCKED
 
 
@@ -193,8 +199,9 @@ def test_path_traversal_attack_is_caught_after_canonicalization(workspace_tmp_pa
         )
     )
 
-    assert response["error"]["code"] == -32600
-    assert ".env" in response["error"]["message"]
+    assert "result" in response
+    assert response["result"]["isError"] is True
+    assert ".env" in response["result"]["content"][0]["text"]
 
 
 def test_expired_capsule_blocks_all_calls(workspace_tmp_path: Path) -> None:
@@ -220,8 +227,9 @@ def test_expired_capsule_blocks_all_calls(workspace_tmp_path: Path) -> None:
         )
     )
 
-    assert response["error"]["code"] == -32600
-    assert "expired" in response["error"]["message"].lower()
+    assert "result" in response
+    assert response["result"]["isError"] is True
+    assert "expired" in response["result"]["content"][0]["text"].lower()
 
 
 def test_no_capsule_for_session_returns_error() -> None:

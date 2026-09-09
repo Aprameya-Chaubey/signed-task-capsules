@@ -419,6 +419,7 @@ def test_reject_endpoint_marks_capsule_rejected(workspace_tmp_path: Path) -> Non
 def test_admin_auth_returns_503_when_token_not_configured(workspace_tmp_path: Path) -> None:
     settings = Settings(
         SIGNING_METHOD="ed25519",
+        ADMIN_API_TOKEN="",
         ED25519_PRIVATE_KEY_PATH=str(workspace_tmp_path / "ed25519.key"),
         DATABASE_PATH=str(workspace_tmp_path / "session.db"),
     )

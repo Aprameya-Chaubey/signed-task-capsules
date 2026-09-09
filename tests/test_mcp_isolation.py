@@ -1,3 +1,4 @@
+import uuid
 import pytest
 import asyncio
 from unittest.mock import patch
@@ -8,10 +9,7 @@ from app.models import SignedCapsule, TrustTier
 from app.config import Settings
 from datetime import datetime, timedelta, timezone
 
-@pytest.fixture(autouse=True)
-def mock_verify_capsule():
-    with patch('app.enforcement.proxy.verify_capsule', return_value=True):
-        yield
+
 
 @pytest.mark.asyncio
 async def test_mcp_real_proxy_tool_list_isolation():
@@ -19,31 +17,38 @@ async def test_mcp_real_proxy_tool_list_isolation():
     class MockAuditLogger:
         async def log(self, *args, **kwargs): pass
     
-    settings = Settings(github_webhook_secret="secret", workspace_root="/tmp")
+    settings = Settings(github_webhook_secret="secret", workspace_root="/tmp", signing_method="ed25519")
     proxy = MCPEnforcementProxy(
         audit_logger=MockAuditLogger(),
         settings=settings,
         tool_handler=GovernedToolHandler(settings.workspace_root)
     )
     
-    def create_capsule(cid, tools):
-        expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        return SignedCapsule(
-            capsule_id=cid,
-            intent='test',
-            allowed_tools=tools,
-            target_paths=[],
+    from app.governance.signer import Ed25519Signer
+    from app.models import PolicyDecision
+    
+    signer = Ed25519Signer(settings, create_if_missing=True)
+    
+    async def create_capsule(cid, tools):
+        decision = PolicyDecision(
+            allow=True,
+            final_tools=tools,
+            final_paths=[],
             trust_tier=TrustTier.CONTRIBUTOR,
-            expiry=expiry,
+            require_human_approval=False,
+            denial_reason=None,
+            intent='test',
             source_hash='a'*64,
             compiler_version='1.0.0',
-            signature=b''
         )
+        with patch('app.governance.signer.uuid4', return_value=uuid.UUID(cid)):
+            signed = await signer.sign(decision)
+        return signed
     
     # Store to simulate database lookup
     store = {
-        'thread-A': create_capsule('11111111-1111-1111-1111-111111111111', ['read_file']),
-        'thread-B': create_capsule('22222222-2222-2222-2222-222222222222', ['write_file'])
+        'thread-A': await create_capsule('11111111-1111-1111-1111-111111111111', ['read_file']),
+        'thread-B': await create_capsule('22222222-2222-2222-2222-222222222222', ['write_file'])
     }
     
     async def mock_loader(thread_id: str) -> SignedCapsule | None:
@@ -70,30 +75,37 @@ async def test_mcp_concurrent_dispatch_isolation():
     class MockAuditLogger:
         async def log(self, *args, **kwargs): pass
         
-    settings = Settings(github_webhook_secret="secret", workspace_root="/tmp")
+    settings = Settings(github_webhook_secret="secret", workspace_root="/tmp", signing_method="ed25519")
     proxy = MCPEnforcementProxy(
         audit_logger=MockAuditLogger(),
         settings=settings,
         tool_handler=GovernedToolHandler(settings.workspace_root)
     )
     
-    def create_capsule(cid, tools):
-        expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        return SignedCapsule(
-            capsule_id=cid,
-            intent='test',
-            allowed_tools=tools,
-            target_paths=[],
+    from app.governance.signer import Ed25519Signer
+    from app.models import PolicyDecision
+    
+    signer = Ed25519Signer(settings, create_if_missing=True)
+    
+    async def create_capsule(cid, tools):
+        decision = PolicyDecision(
+            allow=True,
+            final_tools=tools,
+            final_paths=[],
             trust_tier=TrustTier.CONTRIBUTOR,
-            expiry=expiry,
+            require_human_approval=False,
+            denial_reason=None,
+            intent='test',
             source_hash='a'*64,
             compiler_version='1.0.0',
-            signature=b''
         )
+        with patch('app.governance.signer.uuid4', return_value=uuid.UUID(cid)):
+            signed = await signer.sign(decision)
+        return signed
         
     store = {
-        'thread-A': create_capsule('11111111-1111-1111-1111-111111111111', ['read_file']),
-        'thread-B': create_capsule('22222222-2222-2222-2222-222222222222', ['write_file'])
+        'thread-A': await create_capsule('11111111-1111-1111-1111-111111111111', ['read_file']),
+        'thread-B': await create_capsule('22222222-2222-2222-2222-222222222222', ['write_file'])
     }
     
     async def mock_loader(thread_id: str) -> SignedCapsule | None:
@@ -126,30 +138,37 @@ async def test_mcp_cross_thread_tool_and_path_denial():
     class MockAuditLogger:
         async def log(self, *args, **kwargs): pass
         
-    settings = Settings(github_webhook_secret="secret", workspace_root="/tmp")
+    settings = Settings(github_webhook_secret="secret", workspace_root="/tmp", signing_method="ed25519")
     proxy = MCPEnforcementProxy(
         audit_logger=MockAuditLogger(),
         settings=settings,
         tool_handler=GovernedToolHandler(settings.workspace_root)
     )
     
-    def create_capsule(cid, tools, paths):
-        expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        return SignedCapsule(
-            capsule_id=cid,
-            intent='test',
-            allowed_tools=tools,
-            target_paths=paths,
+    from app.governance.signer import Ed25519Signer
+    from app.models import PolicyDecision
+    
+    signer = Ed25519Signer(settings, create_if_missing=True)
+    
+    async def create_capsule(cid, tools, paths):
+        decision = PolicyDecision(
+            allow=True,
+            final_tools=tools,
+            final_paths=paths,
             trust_tier=TrustTier.CONTRIBUTOR,
-            expiry=expiry,
+            require_human_approval=False,
+            denial_reason=None,
+            intent='test',
             source_hash='a'*64,
             compiler_version='1.0.0',
-            signature=b''
         )
+        with patch('app.governance.signer.uuid4', return_value=uuid.UUID(cid)):
+            signed = await signer.sign(decision)
+        return signed
         
     store = {
-        'thread-A': create_capsule('11111111-1111-1111-1111-111111111111', ['read_file'], ['src/**/*.py']),
-        'thread-B': create_capsule('22222222-2222-2222-2222-222222222222', ['write_file'], ['docs/**/*.md'])
+        'thread-A': await create_capsule('11111111-1111-1111-1111-111111111111', ['read_file'], ['src/**/*.py']),
+        'thread-B': await create_capsule('22222222-2222-2222-2222-222222222222', ['write_file'], ['docs/**/*.md'])
     }
     
     async def mock_loader(thread_id: str) -> SignedCapsule | None:
@@ -165,11 +184,15 @@ async def test_mcp_cross_thread_tool_and_path_denial():
         'params': {'name': 'write_file', 'arguments': {'path': 'docs/foo.md'}}
     }, 'thread-A')
     
-    assert "error" in res
-    assert res["error"]["message"] == "Capsule 11111111-1111-1111-1111-111111111111 blocked tool call: Tool 'write_file' is not allowed"
+    assert "result" in res
+    assert res["result"]["isError"] is True
+    assert "Tool 'write_file' is not allowed" in res["result"]["content"][0]["text"]
     
 @pytest.mark.asyncio
 async def test_mcp_unregistered_thread_fails_closed():
+    """tools/list returns the full catalogue when no capsule is active (so Bob
+    connects and stays green), but tools/call is still blocked with no capsule.
+    Enforcement is fail-closed at call time, not at list time."""
     class MockAuditLogger:
         async def log(self, *args, **kwargs): pass
         
@@ -182,6 +205,16 @@ async def test_mcp_unregistered_thread_fails_closed():
     
     server = MCPServer(proxy, capsule_loader=lambda t: None)
     
+    # tools/list with no capsule must succeed (returns full catalogue so Bob connects)
     res = await server.dispatch({'jsonrpc': '2.0', 'method': 'tools/list', 'id': 1}, 'unregistered-thread')
-    assert "error" in res
-    assert res["error"]["message"] == "No active capsule for thread"
+    assert "error" not in res
+    assert "result" in res
+    assert len(res["result"]["tools"]) > 0  # full catalogue returned
+
+    # tools/call with no capsule must still be blocked (returns a JSON-RPC error)
+    call_res = await server.dispatch({
+        'jsonrpc': '2.0', 'method': 'tools/call', 'id': 2,
+        'params': {'name': 'read_file', 'arguments': {'path': 'README.md'}}
+    }, 'unregistered-thread')
+    assert "error" in call_res
+    assert "capsule" in call_res["error"]["message"].lower()

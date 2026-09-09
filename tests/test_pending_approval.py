@@ -33,7 +33,7 @@ async def test_pending_approval_does_not_sign_initially():
             content=raw_body,
             headers={
                 'Content-Type': 'application/json',
-                'X-GitHub-Event': 'issues',
+                'X-GitHub-Delivery': str(__import__('uuid').uuid4()), 'X-GitHub-Event': 'issues',
                 'X-Hub-Signature-256': _signature(raw_body, 'correct-secret'),
             },
         )
@@ -98,7 +98,7 @@ async def test_concurrent_double_approval_prevents_multiple_issuance():
     
     # Seed the pending store
     import uuid
-    pending_id = str(uuid.uuid4())
+    pending_id = str(__import__('uuid').uuid4())
     await app.state.webhook_dependencies.pending_store.add_pending(pending_id, decision.model_dump_json(), "org/repo#123")
     
     import httpx
@@ -136,7 +136,7 @@ async def test_sequential_double_approval_fails():
     )
     
     import uuid
-    pending_id = str(uuid.uuid4())
+    pending_id = str(__import__('uuid').uuid4())
     await app.state.webhook_dependencies.pending_store.add_pending(pending_id, decision.model_dump_json(), "org/repo#123")
     
     import httpx
@@ -166,7 +166,7 @@ async def test_rejection_then_approval_fails():
     )
     
     import uuid
-    pending_id = str(uuid.uuid4())
+    pending_id = str(__import__('uuid').uuid4())
     await app.state.webhook_dependencies.pending_store.add_pending(pending_id, decision.model_dump_json(), "org/repo#123")
     
     import httpx

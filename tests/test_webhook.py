@@ -242,7 +242,7 @@ def test_webhook_rejects_wrong_hmac_secret() -> None:
             content=raw_body,
             headers={
                 "Content-Type": "application/json",
-                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "issues",
                 "X-Hub-Signature-256": _signature(
                     raw_body,
                     "wrong-secret",
@@ -274,7 +274,7 @@ def test_webhook_rejects_missing_signature_header() -> None:
             content=raw_body,
             headers={
                 "Content-Type": "application/json",
-                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "issues",
             },
         )
 
@@ -307,7 +307,7 @@ def test_invalid_signature_is_rejected_before_duplicate_check_consumes_delivery_
             content=raw_body,
             headers={
                 "Content-Type": "application/json",
-                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "issues",
                 "X-GitHub-Delivery": delivery_id,
                 "X-Hub-Signature-256": _signature(raw_body, "wrong-secret"),
             },
@@ -322,7 +322,7 @@ def test_invalid_signature_is_rejected_before_duplicate_check_consumes_delivery_
             content=raw_body,
             headers={
                 "Content-Type": "application/json",
-                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "issues",
                 "X-GitHub-Delivery": delivery_id,
                 "X-Hub-Signature-256": _signature(raw_body, "correct-secret"),
             },
@@ -378,7 +378,7 @@ def test_webhook_full_pipeline_issued_with_mocked_dependencies() -> None:
             content=raw_body,
             headers={
                 "Content-Type": "application/json",
-                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "issues",
                 "X-Hub-Signature-256": _signature(raw_body, "correct-secret"),
             },
         )
@@ -420,7 +420,7 @@ def test_denied_request_returns_denial_reason() -> None:
             content=raw_body,
             headers={
                 "Content-Type": "application/json",
-                "X-GitHub-Event": "issues",
+                "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "issues",
                 "X-Hub-Signature-256": _signature(raw_body, "correct-secret"),
             },
         )
@@ -478,7 +478,7 @@ def test_webhook_non_issue_event_uses_delivery_id_for_thread() -> None:
             content=raw_body,
             headers={
                 "Content-Type": "application/json",
-                "X-GitHub-Event": "push",
+                "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "push",
                 "X-GitHub-Delivery": "550e8400-e29b-41d4-a716-446655440000",
                 "X-Hub-Signature-256": _signature(raw_body, "correct-secret"),
             },

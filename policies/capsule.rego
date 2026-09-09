@@ -51,18 +51,56 @@ denied_path contains path if {
     glob.match(pattern, ["/"], sprintf("./%s", [normalized_path]))
 }
 
-# A path is anchored if at least one segment is a literal (no glob wildcard).
-# "src/**/*.py" is anchored (src/); "**/*.py" and "*.py" are not.
+# A path is anchored if at least one segment is a literal (no glob wildcard)
+# and is not just "." (which is overly broad).
+# "src/**/*.py" is anchored (src/); "**/*.py" and "*.py" and "." are not.
 anchored_path(path) if {
     segment := split(replace(path, "\\", "/"), "/")[_]
     segment != ""
+    segment != "."
     not contains(segment, "*")
     not contains(segment, "?")
+}
+
+# Reject paths containing null bytes.
+invalid_path(path) if {
+    contains(path, "\u0000")
+}
+
+# Reject absolute paths (POSIX, Windows drive-letter, UNC).
+invalid_path(path) if {
+    normalized := replace(path, "\\", "/")
+    startswith(normalized, "/")
+}
+
+invalid_path(path) if {
+    re_match(`^[A-Za-z]:`, path)
+}
+
+invalid_path(path) if {
+    normalized := replace(path, "\\", "/")
+    startswith(normalized, "//")
+}
+
+# Reject directory traversal.
+invalid_path(path) if {
+    normalized := replace(path, "\\", "/")
+    contains(sprintf("/%s/", [normalized]), "/../")
+}
+
+invalid_path(path) if {
+    path == ".."
+}
+
+invalid_path(path) if {
+    normalized := replace(path, "\\", "/")
+    startswith(normalized, "../")
 }
 
 allowed_path contains path if {
     path := input.compiler_output.target_paths[_]
     not denied_path[path]
+    not invalid_path(path)
 }
 
 final_paths contains path if {

@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app.auth import require_admin_auth
+from app.governance.session import SessionTracker
 from app.ingestion.webhook import WebhookDependencies, get_webhook_dependencies
 from app.models import AuditEvent, AuditEventType, GovernancePipelineOutput, PolicyDecision
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["approval"])
+
+
+def get_session_tracker(request: Request) -> SessionTracker:
+    """Resolve the app-scoped SessionTracker dependency."""
+    tracker = getattr(request.app.state, "session_tracker", None)
+    if not isinstance(tracker, SessionTracker):
+        raise HTTPException(status_code=503, detail="Session tracker is unavailable")
+    return tracker
 
 
 @router.post("/capsules/{capsule_id}/approve", response_model=GovernancePipelineOutput)
@@ -84,7 +94,6 @@ async def reject_capsule(
     if not success:
         raise HTTPException(status_code=409, detail="Pending approval already resolved")
 
-    from app.models import PolicyDecision
     policy_decision = PolicyDecision.model_validate_json(pending_data["policy_decision"])
 
     await dependencies.audit_logger.log(
@@ -102,3 +111,30 @@ async def reject_capsule(
         denial_reason="Human approval rejected",
         capsule=None,
     )
+
+
+@router.delete("/sessions")
+async def reset_session(
+    request: Request,
+    thread_id: str,
+    tracker: SessionTracker = Depends(get_session_tracker),
+    _: None = Depends(require_admin_auth),
+) -> JSONResponse:
+    """Clear the in-memory session history for one thread (demo / test utility).
+
+    Pass the thread ID as a query parameter, e.g.::
+
+        DELETE /sessions?thread_id=owner%2Frepo%231
+
+    This endpoint only resets the in-memory escalation counters that live in
+    ``SessionTracker``.  The caller should also wipe the relevant SQLite rows
+    (``session_history``, ``session_tools``) if a full clean-room reset is
+    required.
+    """
+    async with tracker._lock:
+        tracker._sessions.pop(thread_id, None)
+        tracker._unique_tools.pop(thread_id, None)
+        tracker._dirty_threads.discard(thread_id)
+
+    logger.info("In-memory session reset for thread %r", thread_id)
+    return JSONResponse({"thread_id": thread_id, "reset": True})

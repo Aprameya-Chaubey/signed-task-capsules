@@ -41,19 +41,24 @@ class SessionTracker:
         self._lock = asyncio.Lock()
         self._dirty_threads: set[str] = set()
         self._schema_ensured = False
-        self._seen_deliveries: dict[str, bool] = {}
+        self._seen_deliveries: dict[str, datetime] = {}
         self._connection: aiosqlite.Connection | None = None
         self._connection_path: str | None = None
+
+    _DEDUP_TTL = timedelta(hours=2)
 
     async def is_duplicate_delivery(self, delivery_id: str | None) -> bool:
         if not delivery_id:
             return False
+        now = _utc_now()
         async with self._lock:
+            # Prune expired entries
+            expired = [k for k, ts in self._seen_deliveries.items() if now - ts > self._DEDUP_TTL]
+            for k in expired:
+                del self._seen_deliveries[k]
             if delivery_id in self._seen_deliveries:
                 return True
-            self._seen_deliveries[delivery_id] = True
-            if len(self._seen_deliveries) > 1000:
-                self._seen_deliveries.pop(next(iter(self._seen_deliveries)))
+            self._seen_deliveries[delivery_id] = now
             return False
 
     @classmethod
@@ -252,11 +257,22 @@ class SessionTracker:
             self._unique_tools.clear()
             self._dirty_threads.clear()
 
+            now = _utc_now()
+
             history_rows = await (
                 await connection.execute("SELECT thread_id, data FROM session_history")
             ).fetchall()
             for thread_id, data in history_rows:
                 session = SessionHistory.model_validate_json(data)
+                
+                # MAINT-07: prune expired capsules on load
+                session.recent_capsules = [
+                    entry for entry in session.recent_capsules
+                    if now - _parse_utc(entry.issued_at) <= _SESSION_WINDOW
+                ]
+                # Reset streak since the gap breaks continuity
+                session.consecutive_high_scope = 0
+                
                 self._sessions[thread_id] = session
 
             tool_rows = await (
@@ -283,4 +299,16 @@ class SessionTracker:
 
             for thread_id in self._sessions:
                 self._unique_tools.setdefault(thread_id, {})
+                
+            # MAINT-07: recalculate cumulative_unique_tools from surviving capsules
+            for thread_id, session in self._sessions.items():
+                current_ids = {e.capsule_id for e in session.recent_capsules}
+                thread_tools = self._unique_tools.get(thread_id, {})
+                for cid in list(thread_tools.keys()):
+                    if cid not in current_ids:
+                        del thread_tools[cid]
+                active = set()
+                for tool_set in thread_tools.values():
+                    active.update(tool_set)
+                session.cumulative_unique_tools = len(active)
 

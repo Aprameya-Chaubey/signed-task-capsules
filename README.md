@@ -91,8 +91,8 @@ Service listens on `http://localhost:8000`.
 Bob’s native file and command tools do **not** automatically route through MCP. For the demo we force the invariant using Bob’s own configuration:
 
 **`.bob/custom_modes.yaml`** — `stc-governed` mode:
-- Allows only `read` + `mcp` tool groups
-- Explicitly excludes `edit` / `command` so native tools cannot bypass the proxy
+- Allows only `mcp` tool group (the `read` group is explicitly excluded to prevent native read operations from bypassing the MCP enforcement proxy — see `docs/known-limitations.md`)
+- Explicitly excludes `read` / `edit` / `command` so native tools cannot bypass the proxy
 
 **`.bob/mcp.json`** — registers the enforcement proxy as the `stc-enforcement-proxy` MCP server.
 

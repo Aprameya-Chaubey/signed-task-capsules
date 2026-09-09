@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from app.governance.policy import PolicyEngine
 from app.models import CapsuleSummary, CompilerOutput, KnownTools, SessionHistory, TrustTier
 
@@ -59,6 +60,7 @@ def test_external_tier_denies_more_than_five_permitted_files() -> None:
     decision = evaluate([KnownTools.READ_FILE], TrustTier.EXTERNAL, paths)
 
     assert decision.allow is False
+    assert decision.denial_reason is not None
     assert "at most 5 target paths" in decision.denial_reason
 
 
@@ -107,6 +109,7 @@ def test_denial_reason_is_meaningful() -> None:
     decision = evaluate([KnownTools.EXECUTE_CMD], TrustTier.CONTRIBUTOR)
 
     assert decision.allow is False
+    assert decision.denial_reason is not None
     assert "No requested tools are permitted" in decision.denial_reason
 
 
@@ -114,6 +117,7 @@ def test_unanchored_glob_is_denied() -> None:
     decision = evaluate([KnownTools.READ_FILE], TrustTier.EXTERNAL, ["**/*.md"])
 
     assert decision.allow is False
+    assert decision.denial_reason is not None
     assert "overly broad" in decision.denial_reason
 
 

@@ -219,7 +219,7 @@ def test_purge_stale_unresolved_pending_capsules_never_deletes_approved() -> Non
 
 def test_run_retention_sweep_logs_audit_event_per_expired_approval() -> None:
     # AuditEvent.capsule_id is pattern-constrained to UUID shape (matching
-    # production, where pending_id is always uuid.uuid4() -- see
+    # production, where pending_id is always __import__('uuid').uuid4() -- see
     # app/ingestion/webhook.py); non-UUID ids would raise inside AuditEvent
     # construction, which run_retention_sweep swallows, silently skipping the
     # log -- use real UUIDs so this test actually exercises audit logging.

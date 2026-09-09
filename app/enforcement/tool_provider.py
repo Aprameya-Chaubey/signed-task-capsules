@@ -55,6 +55,10 @@ _SECURE_OPEN_SUPPORTED = {os.open, os.mkdir}.issubset(os.supports_dir_fd)
 
 _DEFAULT_FILE_MODE = 0o644
 
+MAX_FILE_READ_BYTES = 5 * 1024 * 1024
+MAX_FILE_WRITE_BYTES = 5 * 1024 * 1024
+MAX_NET_RESPONSE_BYTES = 5 * 1024 * 1024
+
 
 class GovernedToolHandler:
     """Perform in-scope file operations after the proxy has authorized a call."""
@@ -180,21 +184,31 @@ class GovernedToolHandler:
         if not _SECURE_OPEN_SUPPORTED:
             # Best-effort fallback: still protected by the lexical check in
             # _resolve(), but theoretically racy. See module docstring.
+            stat = target.stat()
+            if stat.st_size > MAX_FILE_READ_BYTES:
+                raise ValueError(f"File size {stat.st_size} exceeds maximum allowed size of {MAX_FILE_READ_BYTES} bytes")
             return target.read_text(encoding="utf-8")
         parts = list(target.relative_to(self._root).parts)
         fd = self._secure_open_fd(parts, for_write=False)
-        with os.fdopen(fd, "r", encoding="utf-8") as handle:
-            return handle.read()
+        with os.fdopen(fd, "rb") as handle:
+            raw_bytes = handle.read(MAX_FILE_READ_BYTES + 1)
+            if len(raw_bytes) > MAX_FILE_READ_BYTES:
+                raise ValueError(f"File exceeds maximum allowed size of {MAX_FILE_READ_BYTES} bytes")
+            return raw_bytes.decode("utf-8", errors="replace")
 
     def _write_target(self, target: Path, content: str) -> None:
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > MAX_FILE_WRITE_BYTES:
+            raise ValueError(f"Content length {len(content_bytes)} exceeds maximum allowed size of {MAX_FILE_WRITE_BYTES} bytes")
+            
         if not _SECURE_OPEN_SUPPORTED:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            target.write_bytes(content_bytes)
             return
         parts = list(target.relative_to(self._root).parts)
         fd = self._secure_open_fd(parts, for_write=True)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content_bytes)
 
     def _read_file(self, arguments: dict[str, Any], capsule: SignedCapsule) -> dict[str, Any]:
         try:
@@ -361,7 +375,10 @@ class GovernedToolHandler:
 
                 try:
                     with opener.open(req, timeout=10) as response:
-                        content = response.read().decode("utf-8", errors="replace")
+                        raw_bytes = response.read(MAX_NET_RESPONSE_BYTES + 1)
+                        if len(raw_bytes) > MAX_NET_RESPONSE_BYTES:
+                            raise ValueError(f"Network response exceeds maximum allowed size of {MAX_NET_RESPONSE_BYTES} bytes")
+                        content = raw_bytes.decode("utf-8", errors="replace")
                     return {
                         "ok": True,
                         "tool": "net_request",

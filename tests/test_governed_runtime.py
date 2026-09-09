@@ -164,8 +164,9 @@ def test_mcp_server_hot_reloads_active_capsule(workspace_tmp_path: Path) -> None
     before, after = asyncio.run(run())
     assert "error" in before
     assert "result" in after
-    assert after["result"]["ok"] is True
-    assert after["result"]["content"] == "x=1"
+    assert after["result"].get("isError") is not True
+    content_items = after["result"].get("content", [])
+    assert any("x=1" in item.get("text", "") for item in content_items)
 
 
 def test_governed_handler_net_request_blocked_host(workspace_tmp_path: Path) -> None:

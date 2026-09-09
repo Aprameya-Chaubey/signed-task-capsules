@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.enforcement.path_utils import match_pattern
+from app.enforcement.path_utils import match_pattern, canonicalize_path
 import re
 from typing import Any
 
@@ -22,7 +22,17 @@ _NON_PATH_LITERALS = {"true", "false", "null", "none", "nan"}
 
 
 def _looks_like_path(value: str) -> bool:
-    candidate = value.strip()
+    # If the value contains newlines or other control characters, strip them
+    # before evaluation.  This closes the newline-injection bypass where an
+    # attacker appends "\n" to a path (e.g. "/etc/passwd\n") to make the proxy
+    # skip the allowlist check.
+    #
+    # However, multiline strings (e.g. file content like "# comment\ncode")
+    # should NOT be extracted as paths.  Heuristic: if the original contained
+    # a newline AND the stripped result has no path separator, treat the
+    # original as non-path content (likely code/text).
+    had_newline = "\n" in value
+    candidate = re.sub(r"[\x00-\x1f\x7f]", "", value).strip()
     if not candidate:
         return False
     if candidate.startswith(("http://", "https://")):
@@ -31,9 +41,15 @@ def _looks_like_path(value: str) -> bool:
         return True
     if candidate.lower() in KNOWN_EXTENSIONLESS:
         return True
-    # Dotfiles are almost always config or secrets.
+    # Dotfiles are almost always config or secrets; extract them even when a
+    # newline was appended (e.g. ".env\n" must still reach the allowlist check).
     if candidate.startswith("."):
         return True
+    # If the original had embedded newlines but the stripped result has no
+    # path-separator or obvious file marker, it's likely multi-line text (code,
+    # prose) rather than a path — skip it to avoid false positives.
+    if had_newline and "/" not in candidate and "\\" not in candidate:
+        return False
     if _COMMON_FILE_EXTENSION.search(candidate):
         return True
     # Flip the default: treat a short bare token as a possible path unless it
@@ -49,8 +65,6 @@ def _looks_like_path(value: str) -> bool:
         return False
     except ValueError:
         pass
-    if " " in candidate:
-        return False
     return True
 
 
@@ -85,37 +99,11 @@ def extract_paths(
     return found_paths
 
 
-def canonicalize_path(path: str) -> str:
-    """Normalize path separators and collapse dot segments safely."""
-
-    normalized = path.replace("\\", "/").strip()
-    if not normalized:
-        return "."
-
-    is_absolute = normalized.startswith("/")
-    parts: list[str] = []
-
-    for raw_part in normalized.split("/"):
-        part = raw_part.strip()
-        if not part or part == ".":
-            continue
-        if part == "..":
-            if parts:
-                parts.pop()
-            continue
-        parts.append(part)
-
-    canonical = "/".join(parts)
-    if is_absolute:
-        return f"/{canonical}" if canonical else "/"
-    return canonical or "."
-
-
 def path_allowed(canonical_path: str, allowed_patterns: list[str]) -> bool:
     """Return whether a canonical path matches any allowed glob pattern."""
-
-    normalized = canonical_path.replace("\\", "/")
-    relative = normalized.lstrip("/")
+    
+    if canonical_path == "" or ".." in canonical_path.split("/"):
+        return False
 
     for pattern in allowed_patterns:
         if match_pattern(canonical_path, pattern):

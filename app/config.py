@@ -80,6 +80,11 @@ class Settings(BaseSettings):
         default="https://token.actions.githubusercontent.com",
         validation_alias="GITHUB_ACTIONS_ISSUER"
     )
+    sigstore_fallback_enabled: bool = Field(
+        default=False,
+        validation_alias="SIGSTORE_FALLBACK_ENABLED",
+        description="Whether to fall back to Ed25519 signing if Sigstore fails"
+    )
 
 
 @lru_cache
@@ -91,13 +96,13 @@ def get_settings() -> Settings:
     settings = Settings()
     
     # Validate that Sigstore identity has been properly configured
-    if settings.github_actions_identity == "PLACEHOLDER_SIGSTORE_IDENTITY_MUST_BE_CONFIGURED":
+    if settings.signing_method == "sigstore" and settings.github_actions_identity == "PLACEHOLDER_SIGSTORE_IDENTITY_MUST_BE_CONFIGURED":
         raise ValueError(
-            "GITHUB_ACTIONS_IDENTITY must be configured with a valid Sigstore identity URL. "
+            "GITHUB_ACTIONS_IDENTITY must be configured with a valid Sigstore identity URL "
+            "when using SIGNING_METHOD=sigstore. "
             "The placeholder default value is not acceptable for production use."
         )
     
     return settings
 
 
-settings = get_settings()

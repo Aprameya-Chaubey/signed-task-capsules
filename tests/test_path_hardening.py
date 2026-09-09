@@ -1,3 +1,4 @@
+import uuid
 import pytest
 from app.enforcement.path_utils import match_pattern
 from app.governance.policy import PolicyEngine

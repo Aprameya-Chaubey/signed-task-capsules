@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI
 from app.audit.logger import AuditLogger
 from app.audit.viewer import router as audit_router
 from app.auth import require_admin_auth
-from app.config import Settings, settings
+from app.config import Settings, get_settings
 from app.enforcement.mcp_server import create_app_mcp_router
 from app.enforcement.proxy import MCPEnforcementProxy
 from app.enforcement.tool_provider import GovernedToolHandler
@@ -62,6 +62,8 @@ async def _pending_cleanup_loop(
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialize long-lived resources used by API routes."""
+
+    settings = get_settings()
 
     audit_logger = AuditLogger(settings.database_path)
     await audit_logger.init_db()
@@ -145,5 +147,5 @@ async def root() -> dict[str, str]:
     return {"service": "signed-task-capsules", "status": "ok"}
 
 
-# Importing settings above verifies that environment-backed configuration is available.
-_ = settings
+# Importing get_settings above verifies that environment-backed configuration is available.
+_ = get_settings()

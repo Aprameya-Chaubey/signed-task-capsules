@@ -96,6 +96,14 @@ class PendingCapsuleStore:
                 created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                 resolved_at      TEXT
             );
+            CREATE INDEX IF NOT EXISTS idx_pending_capsules_thread_status
+                ON pending_capsules (thread_id, status);
+            CREATE INDEX IF NOT EXISTS idx_pending_capsules_resolved_at
+                ON pending_capsules (resolved_at);
+            CREATE INDEX IF NOT EXISTS idx_pending_approvals_status
+                ON pending_approvals (status);
+            CREATE INDEX IF NOT EXISTS idx_pending_approvals_resolved_at
+                ON pending_approvals (resolved_at);
             """
         )
         await connection.commit()
@@ -116,7 +124,9 @@ class PendingCapsuleStore:
     async def init_db(self) -> None:
         """Create the pending-capsule table if it does not yet exist.
         Included for backward compatibility. Use _get_connection() directly instead."""
-        await self._get_connection()
+        conn = await self._get_connection()
+        await conn.execute("UPDATE pending_approvals SET status = 'pending' WHERE status = 'processing'")
+        await conn.commit()
 
     async def add_pending(self, pending_id: str, policy_decision: str, thread_id: str) -> None:
         """Store an unsigned policy decision in the pending_approvals table."""
@@ -146,8 +156,20 @@ class PendingCapsuleStore:
         conn = await self._get_connection()
         async with self._lock:
             cursor = await conn.execute(
-                "UPDATE pending_approvals SET status = ?, resolved_at = ? WHERE pending_id = ? AND status = 'pending'",
+                "UPDATE pending_approvals SET status = ?, resolved_at = ? WHERE pending_id = ? AND status IN ('pending', 'processing')",
                 (status, _utc_now_text(), pending_id),
+            )
+            await conn.commit()
+            return cursor.rowcount > 0
+
+    async def try_claim_pending(self, pending_id: str) -> bool:
+        """Atomically transition a pending approval from 'pending' to 'processing'
+        so concurrent /approve calls can't both proceed to signing."""
+        conn = await self._get_connection()
+        async with self._lock:
+            cursor = await conn.execute(
+                "UPDATE pending_approvals SET status = 'processing' WHERE pending_id = ? AND status = 'pending'",
+                (pending_id,),
             )
             await conn.commit()
             return cursor.rowcount > 0
@@ -161,7 +183,7 @@ class PendingCapsuleStore:
         async with self._lock:
             # First attempt to resolve the pending approval
             cursor = await conn.execute(
-                "UPDATE pending_approvals SET status = 'approved', resolved_at = ? WHERE pending_id = ? AND status = 'pending'",
+                "UPDATE pending_approvals SET status = 'approved', resolved_at = ? WHERE pending_id = ? AND status = 'processing'",
                 (_utc_now_text(), pending_id),
             )
             if cursor.rowcount == 0:
@@ -239,28 +261,28 @@ class PendingCapsuleStore:
         )
 
     async def resolve(self, capsule_id: str, status: str) -> PendingCapsule | None:
-        """Transition a pending capsule to a terminal status.
+        """Transition an approved capsule to a terminal status.
 
-        Returns the capsule if it was pending and got resolved; None if it does
-        not exist or was already resolved.
+        Returns the capsule if it was approved and got resolved; None if it does
+        not exist or was already in a different terminal state.
         """
         conn = await self._get_connection()
         async with self._lock:
+            cursor = await conn.execute(
+                "UPDATE pending_capsules SET status = ?, resolved_at = ? "
+                "WHERE capsule_id = ? AND status = ?",
+                (status, _utc_now_text(), capsule_id, APPROVED),
+            )
+            if cursor.rowcount == 0:
+                return None
+            await conn.commit()
+
             cursor = await conn.execute(
                 "SELECT capsule_json, thread_id, status FROM pending_capsules "
                 "WHERE capsule_id = ?",
                 (capsule_id,),
             )
             row = await cursor.fetchone()
-            if row is None or row["status"] != PENDING:
-                return None
-
-            await self._connection.execute(
-                "UPDATE pending_capsules SET status = ?, resolved_at = ? "
-                "WHERE capsule_id = ?",
-                (status, _utc_now_text(), capsule_id),
-            )
-            await conn.commit()
 
         return PendingCapsule(
             capsule=SignedCapsule.model_validate_json(row["capsule_json"]),
@@ -324,7 +346,11 @@ class PendingCapsuleStore:
     async def expire_stale_pending_approvals(
         self, *, ttl: timedelta, now: datetime | None = None
     ) -> list[str]:
-        """Transition 'pending' approvals older than ``ttl`` to 'expired'.
+        """Transition 'pending' and stuck 'processing' approvals older than ``ttl`` to 'expired'.
+
+        Rows in 'processing' state are included because a server crash during
+        the approval flow would leave them permanently orphaned — they would
+        never be expired, deleted, or re-claimed.
 
         Reuses resolve_approval()'s atomic ``WHERE status = 'pending'`` guard
         for each row, so a human approval/rejection racing with this sweep
@@ -334,7 +360,7 @@ class PendingCapsuleStore:
         conn = await self._get_connection()
         async with self._lock:
             cursor = await conn.execute(
-                "SELECT pending_id, created_at FROM pending_approvals WHERE status = 'pending'"
+                "SELECT pending_id, created_at FROM pending_approvals WHERE status IN ('pending', 'processing')"
             )
             rows = await cursor.fetchall()
 

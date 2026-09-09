@@ -1,5 +1,6 @@
 """Automated assertions for final demo scenarios A, B, C, and D."""
 
+import uuid
 from scripts.demo_scenario_a import run_scenario as run_scenario_a
 from scripts.demo_scenario_b import run_scenario as run_scenario_b
 from scripts.demo_scenario_c import run_scenario as run_scenario_c

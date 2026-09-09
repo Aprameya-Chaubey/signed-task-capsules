@@ -107,7 +107,7 @@ def post_webhook(
         content=raw_body,
         headers={
             "Content-Type": "application/json",
-            "X-GitHub-Event": event_type,
+            "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": event_type,
             "X-Hub-Signature-256": _signature(raw_body, secret),
         },
     )

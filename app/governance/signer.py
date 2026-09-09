@@ -226,6 +226,10 @@ class SigstoreSigner(CapsuleSigner):
             return unsigned_capsule.model_copy(update={"signature": bundle})
         except Exception as exc:
             logger.exception("Sigstore signing failed")
+            
+            if not self._settings.sigstore_fallback_enabled:
+                raise RuntimeError("Sigstore signing failed and fallback is disabled") from exc
+                
             try:
                 fallback = Ed25519Signer(self._settings, create_if_missing=True)
             except Exception as fallback_exc:

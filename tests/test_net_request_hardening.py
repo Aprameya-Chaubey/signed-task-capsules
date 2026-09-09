@@ -497,7 +497,7 @@ def test_approval_requester_receives_policy_decision_not_fake_capsule(workspace:
         resp = client.post(
             "/webhook",
             content=raw_body,
-            headers={"Content-Type": "application/json", "X-GitHub-Event": "issues", "X-Hub-Signature-256": sig},
+            headers={"Content-Type": "application/json", "X-GitHub-Delivery": str(__import__('uuid').uuid4()), "X-GitHub-Event": "issues", "X-Hub-Signature-256": sig},
         )
 
     assert resp.status_code == 200

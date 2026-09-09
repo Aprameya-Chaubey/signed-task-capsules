@@ -104,7 +104,7 @@ class WatsonxClient(LLMClient):
 
     iam_endpoint = "https://iam.cloud.ibm.com/identity/token"
     default_base_url = "https://us-south.ml.cloud.ibm.com"
-    api_version = "2025-10-25"
+    api_version = "2024-05-31"
 
     def __init__(
         self,
@@ -128,8 +128,10 @@ class WatsonxClient(LLMClient):
         self._iam_token: str | None = None
         self._iam_token_expires_at: float = 0.0
         self._token_lock = asyncio.Lock()
+        # MAINT-03: json_object mode guarantees well-formed JSON but not strict schema conformance.
+        # The compiler's Pydantic retry loop handles schema validation failures.
         if not self._project_id:
-            logger.warning("WATSONX_PROJECT_ID not set — compiler will use safe fallback")
+            raise ValueError("WATSONX_PROJECT_ID is not configured but required for watsonx provider")
 
     async def aclose(self) -> None:
         if self._owns_client:

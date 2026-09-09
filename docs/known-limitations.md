@@ -55,13 +55,15 @@ scope for the hackathon implementation. Each item has a clear production fix.
 
 ## Governed tool surface
 
-- **Governed handler covers file ops only.** `GovernedToolHandler`
+- **Governed handler covers file ops and network requests.** `GovernedToolHandler`
   (`app/enforcement/tool_provider.py`) implements in-scope `read_file`/`write_file`
-  behind the proxy, contained within `WORKSPACE_ROOT`. `execute_cmd`, `run_tests`,
-  and `net_request` are deliberately reported as "no governed implementation"
-  rather than executed, so a locked-down agent never runs arbitrary shell or
-  network calls through the governed surface. Production fix: sandboxed executors
-  for those tools if the demo requires them.
+  behind the proxy, contained within `WORKSPACE_ROOT`, as well as `net_request`
+  with comprehensive SSRF hardening (allowlist enforcement, `getaddrinfo`-based
+  DNS resolution with private-IP rejection, IP-pinned connections, and
+  per-redirect re-validation). `execute_cmd` and `run_tests` are deliberately
+  reported as "no governed implementation" rather than executed, so a locked-down
+  agent never runs arbitrary shell calls through the governed surface.
+  Production fix: sandboxed executors for those tools if the demo requires them.
 
 ## Storage / operations
 

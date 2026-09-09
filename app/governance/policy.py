@@ -170,24 +170,129 @@ class PolicyEngine:
         if "/../" in f"/{normalized}/" or normalized == ".." or normalized.startswith("../"):
             return False
 
-        # Anchor check: Require at least one non-wildcard path segment before any glob wildcard.
+        # Anchor check: Require at least one non-wildcard path segment anywhere in the path.
         parts = normalized.split("/")
         for part in parts:
-            if "*" in part or "?" in part:
-                return False
-            if part and part != ".":
+            if part and part != "." and "*" not in part and "?" not in part:
                 return True
         return False
 
     @staticmethod
     def _path_matches_denied(path: str, denied_patterns: set[str] | frozenset[str]) -> bool:
-        """Return whether a path matches any denied glob, including at repo root."""
+        """Return whether a concrete path or glob-pattern path matches any denied glob.
+
+        When the requested *path* is itself a glob (contains ``*`` or ``?``), the
+        original literal ``match_pattern`` call silently fails to detect the
+        intersection because ``match_pattern`` treats its first argument as a concrete
+        path, not a pattern.  This method handles glob-in-path correctly:
+
+        - **Concrete paths** are checked directly with ``match_pattern``.
+        - **Glob paths** are checked conservatively: only flagged as denied if the
+          glob's concrete *directory* prefix overlaps with the denied pattern's
+          directory scope AND the glob's leaf pattern could match the denied pattern's
+          leaf.  Unanchored globs (e.g. ``**/*.md``) with no concrete directory
+          prefix are NOT marked as denied here — they are rejected as overly-broad by
+          ``_validate_target_path`` instead, preserving the denial reason.
+        """
+        import fnmatch as _fnmatch
 
         normalized_path = path.replace("\\", "/").removeprefix("./")
-        return any(
-            match_pattern(normalized_path, pattern)
-            for pattern in denied_patterns
-        )
+
+        # ── Fast path: concrete (non-glob) path ──────────────────────────────
+        if "*" not in normalized_path and "?" not in normalized_path:
+            return any(
+                match_pattern(normalized_path, pattern)
+                for pattern in denied_patterns
+            )
+
+        if not denied_patterns:
+            return False
+
+        # ── Slow path: requested path is a glob ──────────────────────────────
+        glob_parts = normalized_path.split("/")
+
+        # Extract the concrete directory prefix (segments before the first
+        # wildcard-containing segment).
+        req_dir_parts: list[str] = []
+        for part in glob_parts[:-1]:           # skip the leaf
+            if "*" in part or "?" in part:
+                break
+            req_dir_parts.append(part)
+
+        # Leaf segment (last part).
+        req_leaf = glob_parts[-1] if glob_parts else "**"
+
+        # If there is no concrete directory prefix at all (e.g. "**/*.md",
+        # "*.py"), let _validate_target_path reject the glob as overly broad
+        # rather than silently marking it as denied.
+        if not req_dir_parts:
+            return False
+
+        req_dir = "/".join(req_dir_parts)   # e.g. "src" from "src/**/*.py"
+
+        for denied in denied_patterns:
+            denied_normalized = denied.replace("\\", "/").removeprefix("./")
+            denied_parts = denied_normalized.split("/")
+
+            # Extract the concrete prefix of the denied pattern.
+            denied_dir_parts: list[str] = []
+            for part in denied_parts:
+                if "*" in part or "?" in part:
+                    break
+                denied_dir_parts.append(part)
+
+            denied_leaf = denied_parts[-1] if denied_parts else "**"
+            denied_dir = "/".join(denied_dir_parts)
+
+            # ── Directory intersection check ──────────────────────────────────
+            # The glob's concrete directory overlaps with the denied pattern's
+            # directory scope if:
+            #   (a) the denied pattern applies everywhere (no concrete dir prefix),
+            #   (b) the denied dir is a sub-dir of the glob dir, or
+            #   (c) the glob dir is a sub-dir of the denied dir.
+            dir_overlaps = (
+                not denied_dir_parts                                      # (a) **/.env style
+                or denied_dir.startswith(req_dir + "/")                  # (b)
+                or denied_dir == req_dir
+                or req_dir.startswith(denied_dir + "/")                  # (c)
+                or req_dir == denied_dir
+            )
+            if not dir_overlaps:
+                continue
+
+            # ── Leaf intersection check ──────────────────────────────────────
+            # The glob's leaf pattern must be able to match files that the denied
+            # pattern's leaf could also match.  The glob leaf is always a pattern;
+            # the denied leaf may be a literal (".env") or a pattern ("*.key").
+            if req_leaf == "**":
+                # "**" matches anything — including denied filenames.
+                return True
+
+            if denied_leaf == "**":
+                # The denied pattern covers a whole subtree (e.g. **/secrets/**).
+                # Only block if our glob's leaf is also "**" (already handled above).
+                continue
+
+            # Cross-match the two leaf patterns/literals.
+            # fnmatch(name, pattern) — returns True if `name` matches glob `pattern`.
+            #
+            # Check #1 — req_leaf as glob, denied_leaf as name:
+            #   e.g. req_leaf="*.pem", denied_leaf=".pem" → fnmatch(".pem", "*.pem")
+            if _fnmatch.fnmatch(denied_leaf, req_leaf):
+                return True
+            # Check #2 — denied_leaf as glob, req_leaf as name (reverse direction):
+            #   Only meaningful when denied_leaf is a glob pattern ("*.key", ".env.*")
+            #   and req_leaf is a concrete literal that could be matched by it.
+            #   e.g. req_leaf=".env", denied_leaf=".env.*" → fnmatch(".env", ".env.*")
+            if "*" in denied_leaf or "?" in denied_leaf:
+                if _fnmatch.fnmatch(req_leaf, denied_leaf):
+                    return True
+            # Check #3 — req_leaf is a bare "*" matching any filename, including
+            # all denied literals and extensions.
+            if req_leaf == "*":
+                return True
+
+        return False
 
     @classmethod
     def _requires_human_approval(
